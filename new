@@ -1,0 +1,103 @@
+import requests
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error
+from ta import add_all_ta_features
+
+# API-ключи:
+# **ВАЖНО:** Замените "YOUR_API_KEY" своими API-ключами.
+binance_api_key = "YOUR_API_KEY"
+kraken_api_key = "YOUR_API_KEY"
+
+# Список криптовалют:
+coins = ["BTC", "ETH", "ADA", "SOL", "DOT"]
+
+# Функции для получения данных:
+def get_price_data(coin, api_key):
+  url = f"https://api.binance.com/api/v3/ticker/price?symbol={coin}USDT"
+  headers = {"X-MBX-API-KEY": api_key}
+  response = requests.get(url, headers=headers)
+  data = response.json()
+  return float(data["price"])
+
+def get_volume_data(coin, api_key):
+  url = f"https://api.kraken.com/0/public/Ticker?pair={coin}USD"
+  headers = {"API-Key": api_key}
+  response = requests.get(url, headers=headers)
+  data = response.json()
+  return data["result"][coin]["USD"]["v"]
+
+# Функции для подготовки данных:
+def prepare_data(coins, api_key_binance, api_key_kraken):
+  prices = {}
+  volumes = {}
+  for coin in coins:
+    prices[coin] = get_price_data(coin, api_key_binance)
+    volumes[coin] = get_volume_data(coin, api_key_kraken)
+
+  data = pd.DataFrame()
+  for coin in coins:
+    data[f"{coin}_Price"] = [prices[coin]]
+    data[f"{coin}_Volume"] = [volumes[coin]]
+
+  # Добавить другие индикаторы
+  data = add_all_ta_features(data, "BTC_Price", open="Open", high="High", low="Low", close="Close")
+
+  return data
+
+# Функция для обучения модели:
+def train_model(data):
+  # Разделить данные на обучающую и тестовую выборки
+  X_train, X_test, y_train, y_test = train_test_split(data.drop("BTC_Price", axis=1), data["BTC_Price"], test_size=0.2)
+
+  # Масштабирование данных
+  scaler = StandardScaler()
+  X_train = scaler.fit_transform(X_train)
+  X_test = scaler.transform(X_test)
+
+  # Обучить модель
+  model = LinearRegression()
+  model.fit(X_train, y_train)
+
+  # Оценить точность модели
+  mse = mean_squared_error(y_test, model.predict(X_test))
+  print(f"MSE: {mse}")
+
+  # Оценка модели с помощью кросс-валидации
+  scores = cross_val_score(model, X_train, y_train, cv=5)
+  print(f"Средний балл кросс-валидации: {np.mean(scores)}")
+
+  return model, scaler
+
+# Функция для формирования рекомендаций:
+def generate_recommendations(model, scaler, data, coins):
+  # Спрогнозировать цены
+  X = scaler.transform(data.drop("BTC_Price", axis=1))
+  predictions = model.predict(X)
+
+  # Сформировать рекомендации
+  recommendations = {}
+  for coin in coins:
+    if predictions[0] > data[f"{coin}_Price"].values[0]:
+      recommendations[coin] = "Buy"
+    else:
+      recommendations[coin] = "Sell"
+
+  # Добавить другие критерии для формирования рекомендаций
+  # ...
+
+  return recommendations
+
+# Пример использования:
+# Подготовка данных
+data = prepare_data(coins, binance_api_key, kraken_api_key)
+
+# Обучение модели
+model, scaler = train_model(data)
+
+# Формирование рекомендаций
+recommendations = generate_recommendations(model,
